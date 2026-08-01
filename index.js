@@ -11,11 +11,11 @@ const parser = new Parser({
   }
 });
 
-// কনফিগারেশন
+// 🎯 GitHub Secrets থেকে রিড করা হচ্ছে
 const RSS_FEED_URL = 'https://akashmiaofficial.icu/feeds/posts/default?alt=rss';
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL; 
+const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 
 function extractMetadata(htmlContent) {
   const titleMatch = htmlContent.match(/title:\s*["']([^"']+)["']/i);
@@ -58,7 +58,7 @@ async function runLocalTest() {
         thumbnailUrl: finalThumbnail
       };
 
-      // টেলিগ্রাম এবং ডিসকোর্ড উভয় টেমপ্লেট নিয়ে আসা
+      // টেলিগ্রাম এবং ডিসকোর্ড উভয় টেমপ্লেট নিয়ে আসা
       const { telegram, discord } = getTemplatesByCategory(categories, postData);
 
       // --- ১. Telegram-এ পোস্ট পাঠানো ---
@@ -114,8 +114,9 @@ async function runLocalTest() {
       console.log('⚠️ RSS Feed-এ কোনো পোস্ট নেই।');
     }
   } catch (error) {
-    console.error('❌ এরর ধরা পড়েছে:', error);
+    console.error('❌ এরর ধরা পড়েছে:', error);
   }
 }
 
+// 🎯 রান করার জন্য ফাংশন কল
 runLocalTest();
