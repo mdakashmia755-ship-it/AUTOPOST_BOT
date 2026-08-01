@@ -6,8 +6,13 @@ export default {
     ctx.waitUntil(checkRssAndPost(env));
   },
 
-  // ২. ব্রাউজার বা ম্যানুয়াল ইউআরএল হিট করে টেস্ট করার জন্য
+  // ২. ব্রাউজার বা ম্যানুয়াল ইউআরএল হিট করে টেস্ট করার জন্য
   async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    if (url.pathname === '/favicon.ico') {
+      return new Response(null, { status: 204 });
+    }
+
     await checkRssAndPost(env);
     return new Response("Auto-poster trigger status checked successfully!", {
       headers: { "Content-Type": "text/plain; charset=utf-8" }
@@ -44,7 +49,7 @@ async function checkRssAndPost(env) {
     const itemMatch = xmlText.match(/<item>([\s\S]*?)<\/item>/i) || xmlText.match(/<entry>([\s\S]*?)<\/entry>/i);
 
     if (!linkMatch || !itemMatch) {
-      console.log("⚠️ RSS Feed-এ কোনো পোস্ট পাওয়া যায়নি।");
+      console.log("⚠️ RSS Feed-এ কোনো পোস্ট পাওয়া যায়নি।");
       return;
     }
 
@@ -61,15 +66,15 @@ async function checkRssAndPost(env) {
       lastPostedLink = await env.TG_BOT_KV.get("LAST_POSTED_LINK");
     }
 
-    // যদি নতুন পোস্ট হয়, তবেই কাজ করবে
+    // যদি নতুন পোস্ট হয়, তবেই কাজ করবে
     if (latestLink !== lastPostedLink) {
       const meta = extractMetadata(fullContent);
 
       const titleMatch = fullContent.match(/<title[^>]*>([^<]+)<\/title>/i);
       const defaultTitle = titleMatch ? titleMatch[1].replace("<![CDATA[", "").replace("]]>", "").trim() : 'New Post';
 
-      const finalTitle = meta.title || latestPost.title || 'New Post';
-      const rawDesc = meta.description || latestPost.contentSnippet || '';
+      const finalTitle = meta.title || defaultTitle;
+      const rawDesc = meta.description || '';
       const cleanDesc = rawDesc.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim();
       const shortDescription = cleanDesc.length > 150 ? cleanDesc.slice(0, 150) + '...' : cleanDesc;
       const finalThumbnail = meta.thumbnailUrl;
@@ -81,8 +86,24 @@ async function checkRssAndPost(env) {
         thumbnailUrl: finalThumbnail
       };
 
-      // ক্যাটাগরি অনুযায়ী টেমপ্লেট নির্বাচন
-      const { telegram, discord } = getTemplatesByCategory(categories, postData);
+      // 🛠️ FIX: ক্যাটাগরি অনুযায়ী টেমপ্লেট নিরাপদে কল করা
+      let templates = {};
+      try {
+        templates = getTemplatesByCategory(categories, postData) || {};
+      } catch (e) {
+        console.error("⚠️ Template Error:", e);
+      }
+
+      // 🛠️ FIX: Fallback Default Templates (যদি কোনো টেমপ্লেট না পাওয়া যায়)
+      const telegram = templates.telegram || {
+        caption: `<b>📌 ${finalTitle}</b>\n\n${shortDescription ? shortDescription + '\n\n' : ''}🔗 <a href="${latestLink}">Read More</a>`,
+        replyMarkup: { inline_keyboard: [[{ text: '🌐 Read Article', url: latestLink }]] }
+      };
+
+      const discord = templates.discord || {
+        content: `**${finalTitle}**\n${latestLink}`,
+        embeds: [{ title: finalTitle, url: latestLink, description: shortDescription, color: 3447003 }]
+      };
 
       // --- ১. Telegram Post ---
       let telegramUrl = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
@@ -136,4 +157,3 @@ async function checkRssAndPost(env) {
     console.error("❌ Worker Execution Error:", err);
   }
 }
- 
