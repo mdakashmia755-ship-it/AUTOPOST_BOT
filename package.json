@@ -1,9 +1,11 @@
 {
-  "name": "tg-autoposter",
+  "name": "rss-autoposter",
   "version": "1.0.0",
   "type": "module",
-  "main": "index.js",
   "scripts": {
-    "deploy": "wrangler deploy"
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "rss-parser": "^3.13.0"
   }
 }
