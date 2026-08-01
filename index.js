@@ -1,5 +1,4 @@
 import Parser from 'rss-parser';
-import fetch from 'node-fetch';
 import { getTemplatesByCategory } from './templates/index.js';
 
 // 🎯 Cloudflare Bypass করার জন্য Custom User-Agent যুক্ত Parser
