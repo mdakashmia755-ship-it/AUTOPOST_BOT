@@ -2,10 +2,6 @@ import Parser from 'rss-parser';
 import { getTemplatesByCategory } from './templates/index.js';
 
 const parser = new Parser({
-  headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
-  },
   customFields: {
     item: [
       ['media:thumbnail', 'mediaThumbnail'],
@@ -15,7 +11,7 @@ const parser = new Parser({
   }
 });
 
-// 🎯 GitHub Secrets থেকে রিড করা হচ্ছে
+// কনফিগারেশন
 const RSS_FEED_URL = 'https://akashmiaofficial.icu/feeds/posts/default?alt=rss';
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -37,7 +33,24 @@ async function runLocalTest() {
   console.log('🔄 RSS Feed চেক করা হচ্ছে...');
 
   try {
-    const feed = await parser.parseURL(RSS_FEED_URL);
+    // 🎯 Step 1: Native Fetch দিয়ে Real Browser Header পাঠাই (Cloudflare Bypass)
+    const response = await fetch(RSS_FEED_URL, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP Fetch Error Status: ${response.status}`);
+    }
+
+    const xmlData = await response.text();
+
+    // 🎯 Step 2: XML টেক্সটকে Parser-এ পাস করি
+    const feed = await parser.parseString(xmlData);
 
     if (feed.items && feed.items.length > 0) {
       const latestPost = feed.items[0];
@@ -62,10 +75,9 @@ async function runLocalTest() {
         thumbnailUrl: finalThumbnail
       };
 
-      // টেলিগ্রাম এবং ডিসকোর্ড উভয় টেমপ্লেট নিয়ে আসা
       const { telegram, discord } = getTemplatesByCategory(categories, postData);
 
-      // --- ১. Telegram-এ পোস্ট পাঠানো ---
+      // --- ১. Telegram ---
       let telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
       let tgPayload = {
         chat_id: TELEGRAM_CHAT_ID,
@@ -96,7 +108,7 @@ async function runLocalTest() {
       if (tgResult.ok) console.log('✅ Telegram-এ পোস্ট সফল!');
       else console.error('❌ Telegram এরর:', tgResult.description || tgResult);
 
-      // --- ২. Discord-এ পোস্ট পাঠানো ---
+      // --- ২. Discord ---
       if (DISCORD_WEBHOOK_URL && DISCORD_WEBHOOK_URL.startsWith('http')) {
         console.log('📤 Discord Webhook-এ পোস্ট পাঠানো হচ্ছে...');
         const dcRes = await fetch(DISCORD_WEBHOOK_URL, {
@@ -110,8 +122,6 @@ async function runLocalTest() {
         } else {
           console.error('❌ Discord এরর Status:', dcRes.status);
         }
-      } else {
-        console.log('ℹ️ Discord Webhook URL সেট করা নেই, তাই Discord পোস্ট স্কিপ করা হলো।');
       }
 
     } else {
@@ -122,5 +132,4 @@ async function runLocalTest() {
   }
 }
 
-// 🎯 রান করার জন্য ফাংশন কল
 runLocalTest();
