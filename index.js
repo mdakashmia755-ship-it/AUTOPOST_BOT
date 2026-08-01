@@ -1,6 +1,9 @@
+import fs from 'fs';
+import path from 'path';
 import Parser from 'rss-parser';
 import { getTemplatesByCategory } from './templates/index.js';
 
+// 🎯 Cloudflare & RSS Parser Setup
 const parser = new Parser({
   customFields: {
     item: [
@@ -16,6 +19,10 @@ const RSS_FEED_URL = 'https://akashmiaofficial.icu/feeds/posts/default?alt=rss';
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8699342196:AAF4_yh8glQWdCX1RdrUJQNusz94mKEXndA';
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '@akashmiaofficial_icu';
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || 'https://discord.com/api/webhooks/1532845389210849472/APylkdSwvzB_MtQk1cVaK-_V4rjREKPEW_vfCedeG5Gw13F_8y82H4DXTtzz9QdbY8hk';
+
+// 📁 data ফোল্ডার ও ফাইল পাথ
+const DATA_DIR = path.join(process.cwd(), 'data');
+const LAST_POST_FILE = path.join(DATA_DIR, 'last_post.json');
 
 function extractMetadata(htmlContent) {
   const titleMatch = htmlContent.match(/title:\s*["']([^"']+)["']/i);
@@ -33,7 +40,23 @@ async function runLocalTest() {
   console.log('🔄 RSS Feed চেক করা হচ্ছে...');
 
   try {
-    // ১. Cloudflare Pass করার জন্য fetch দিয়ে Feed নামানো
+    // 📁 ১. data ফোল্ডার না থাকলে স্বয়ংক্রিয়ভাবে তৈরি হবে
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+
+    // 📁 ২. আগের সেভ হওয়া পোস্টের লিঙ্ক পড়া
+    let lastPostLink = '';
+    if (fs.existsSync(LAST_POST_FILE)) {
+      try {
+        const savedData = JSON.parse(fs.readFileSync(LAST_POST_FILE, 'utf8'));
+        lastPostLink = savedData.link || '';
+      } catch (e) {
+        console.log('⚠️ পুরোনো ফাইল পড়তে সমস্যা হয়েছে, নতুন সেভ ফাইল তৈরি হবে।');
+      }
+    }
+
+    // ৩. Cloudflare Pass করার জন্য fetch দিয়ে Feed আনা
     const response = await fetch(RSS_FEED_URL, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) GitHub-Actions-AutoPostBot/1.0',
@@ -46,13 +69,18 @@ async function runLocalTest() {
     }
 
     const xmlData = await response.text();
-
-    // ২. লোকালহোস্টের মতো rss-parser দিয়ে এক্স্যাক্ট একই উপায়ে পার্স করা
     const feed = await parser.parseString(xmlData);
 
     if (feed.items && feed.items.length > 0) {
       const latestPost = feed.items[0];
       const postLink = latestPost.link || '';
+
+      // 🎯 ৪. নতুন পোস্টটি আগের সেভ হওয়া পোস্টের সাথে মিললে স্কিপ করবে
+      if (postLink && postLink === lastPostLink) {
+        console.log('ℹ️ এই পোস্টটি আগেই পাঠানো হয়েছে। নতুন কোনো পোস্ট নেই!');
+        return;
+      }
+
       const fullContent = latestPost.content || latestPost['content:encoded'] || '';
       const categories = latestPost.categories || [];
 
@@ -73,10 +101,9 @@ async function runLocalTest() {
         thumbnailUrl: finalThumbnail
       };
 
-      // টেলিগ্রাম এবং ডিসকোর্ড উভয় টেমপ্লেট নিয়ে আসা
       const { telegram, discord } = getTemplatesByCategory(categories, postData);
 
-      // --- ১. Telegram-এ পোস্ট পাঠানো ---
+      // --- ৫. Telegram-এ পোস্ট পাঠানো ---
       let telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
       let tgPayload = {
         chat_id: TELEGRAM_CHAT_ID,
@@ -107,7 +134,7 @@ async function runLocalTest() {
       if (tgResult.ok) console.log('✅ Telegram-এ পোস্ট সফল!');
       else console.error('❌ Telegram এরর:', tgResult.description || tgResult);
 
-      // --- ২. Discord-এ পোস্ট পাঠানো ---
+      // --- ৬. Discord-এ পোস্ট পাঠানো ---
       if (DISCORD_WEBHOOK_URL && DISCORD_WEBHOOK_URL.startsWith('http')) {
         console.log('📤 Discord Webhook-এ পোস্ট পাঠানো হচ্ছে...');
         const dcRes = await fetch(DISCORD_WEBHOOK_URL, {
@@ -123,6 +150,14 @@ async function runLocalTest() {
         }
       } else {
         console.log('ℹ️ Discord Webhook URL সেট করা নেই, তাই Discord পোস্ট স্কিপ করা হলো।');
+      }
+
+      // 📁 ৭. পোস্ট সফল হলে data/last_post.json ফাইলে সেভ রাখা
+      try {
+        fs.writeFileSync(LAST_POST_FILE, JSON.stringify({ link: postLink, updated_at: new Date().toISOString() }, null, 2), 'utf8');
+        console.log('💾 নতুন পোস্টের লিঙ্ক data/last_post.json ফাইলে সফলভাবে সেভ হয়েছে!');
+      } catch (err) {
+        console.error('❌ ফাইল সেভ করতে সমস্যা হয়েছে:', err.message);
       }
 
     } else {
