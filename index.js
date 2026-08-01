@@ -1,12 +1,12 @@
 import { getTemplatesByCategory } from './templates/index.js';
 
 export default {
-  // ১. Cron Trigger (অটোমেটিক প্রতি ৫/১০ মিনিট পর পর এটি চলবে)
+  // ১. Cron Trigger
   async scheduled(event, env, ctx) {
     ctx.waitUntil(checkRssAndPost(env));
   },
 
-  // ২. ব্রাউজার বা ম্যানুয়াল ইউআরএল হিট করে টেস্ট করার জন্য
+  // ২. Manual / Browser Hit Trigger
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === '/favicon.ico') {
@@ -33,7 +33,6 @@ function extractMetadata(htmlContent) {
   };
 }
 
-// মূল প্রসেস ফাংশন
 async function checkRssAndPost(env) {
   const RSS_URL = env.RSS_FEED_URL || 'https://akashmiaofficial.icu/feeds/posts/default?alt=rss';
   const BOT_TOKEN = env.TELEGRAM_BOT_TOKEN;
@@ -44,7 +43,6 @@ async function checkRssAndPost(env) {
     const res = await fetch(RSS_URL);
     const xmlText = await res.text();
 
-    // RSS থেকে লিঙ্ক বের করা
     const linkMatch = xmlText.match(/<link[^>]*href=["']([^"']+)["']/i) || xmlText.match(/<link>([^<]+)<\/link>/i);
     const itemMatch = xmlText.match(/<item>([\s\S]*?)<\/item>/i) || xmlText.match(/<entry>([\s\S]*?)<\/entry>/i);
 
@@ -56,17 +54,22 @@ async function checkRssAndPost(env) {
     const latestLink = linkMatch[1];
     const fullContent = itemMatch[1];
 
-    // ক্যাটাগরি / লেবেল বের করা
-    const categoryMatches = [...fullContent.matchAll(/<category[^>]*term=["']([^"']+)["']/gi)];
-    const categories = categoryMatches.map(m => m[1]);
+    // 🎯 Blogger Feed থেকে সবধরনের Category / Label সঠিকভাবে রিড করার নিখুঁত লজিক
+    const categoryMatches = [
+      ...fullContent.matchAll(/<category[^>]*term=["']([^"']+)["']/gi),
+      ...fullContent.matchAll(/<category[^>]*>([^<]+)<\/category>/gi)
+    ];
+    
+    // ক্যাটাগরিগুলো ফিল্টার করে ক্লিন অ্যারে বানানো
+    const categories = [...new Set(categoryMatches.map(m => m[1]?.trim()).filter(Boolean))];
 
-    // Cloudflare KV থেকে শেষ পোস্ট করা লিঙ্ক চেক করা
+    console.log("🏷️ Cloudflare Extracted Labels:", categories);
+
     let lastPostedLink = null;
     if (env.TG_BOT_KV) {
       lastPostedLink = await env.TG_BOT_KV.get("LAST_POSTED_LINK");
     }
 
-    // যদি নতুন পোস্ট হয়, তবেই কাজ করবে
     if (latestLink !== lastPostedLink) {
       const meta = extractMetadata(fullContent);
 
@@ -86,24 +89,8 @@ async function checkRssAndPost(env) {
         thumbnailUrl: finalThumbnail
       };
 
-      // 🛠️ FIX: ক্যাটাগরি অনুযায়ী টেমপ্লেট নিরাপদে কল করা
-      let templates = {};
-      try {
-        templates = getTemplatesByCategory(categories, postData) || {};
-      } catch (e) {
-        console.error("⚠️ Template Error:", e);
-      }
-
-      // 🛠️ FIX: Fallback Default Templates (যদি কোনো টেমপ্লেট না পাওয়া যায়)
-      const telegram = templates.telegram || {
-        caption: `<b>📌 ${finalTitle}</b>\n\n${shortDescription ? shortDescription + '\n\n' : ''}🔗 <a href="${latestLink}">Read More</a>`,
-        replyMarkup: { inline_keyboard: [[{ text: '🌐 Read Article', url: latestLink }]] }
-      };
-
-      const discord = templates.discord || {
-        content: `**${finalTitle}**\n${latestLink}`,
-        embeds: [{ title: finalTitle, url: latestLink, description: shortDescription, color: 3447003 }]
-      };
+      // 🎯 সরাসরি আপনার templates/index.js-কে কল করা (কোনো ফলব্যাক ছাড়া)
+      const { telegram, discord } = getTemplatesByCategory(categories, postData);
 
       // --- ১. Telegram Post ---
       let telegramUrl = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
@@ -141,12 +128,11 @@ async function checkRssAndPost(env) {
         });
       }
 
-      // সফল হলে KV-তে লিঙ্ক সেভ করা
       if (tgResult.ok) {
         if (env.TG_BOT_KV) {
           await env.TG_BOT_KV.put("LAST_POSTED_LINK", latestLink);
         }
-        console.log("✅ Successfully posted to Telegram & Discord!");
+        console.log("✅ Custom Template দিয়ে সফলভাবে পোস্ট করা হয়েছে!");
       } else {
         console.error("❌ Telegram Error:", tgResult);
       }
