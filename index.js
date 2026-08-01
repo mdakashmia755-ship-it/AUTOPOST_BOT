@@ -1,8 +1,6 @@
 import Parser from 'rss-parser';
-import fetch from 'node-fetch';
 import { getTemplatesByCategory } from './templates/index.js';
 
-// 🎯 Cloudflare Bypass করার জন্য Custom User-Agent সহ Parser
 const parser = new Parser({
   customFields: {
     item: [
@@ -10,12 +8,6 @@ const parser = new Parser({
       ['media:content', 'mediaContent'],
       ['content:encoded', 'contentEncoded']
     ],
-  },
-  requestOptions: {
-    headers: {
-      'User-Agent': 'GitHub-Actions-AutoPostBot/1.0',
-      'Accept': 'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8'
-    }
   }
 });
 
@@ -23,7 +15,7 @@ const parser = new Parser({
 const RSS_FEED_URL = 'https://akashmiaofficial.icu/feeds/posts/default?alt=rss';
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8699342196:AAF4_yh8glQWdCX1RdrUJQNusz94mKEXndA';
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '@akashmiaofficial_icu';
-const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || 'https://discord.com/api/webhooks/1532845389210849472/APylkdSwvzB_MtQk1cVaK-_V4rjREKPEW_vfCedeG5Gw13F_8y82H4DXTtzz9QdbY8hk'; 
+const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || 'https://discord.com/api/webhooks/1532845389210849472/APylkdSwvzB_MtQk1cVaK-_V4rjREKPEW_vfCedeG5Gw13F_8y82H4DXTtzz9QdbY8hk';
 
 function extractMetadata(htmlContent) {
   const titleMatch = htmlContent.match(/title:\s*["']([^"']+)["']/i);
@@ -41,7 +33,22 @@ async function runLocalTest() {
   console.log('🔄 RSS Feed চেক করা হচ্ছে...');
 
   try {
-    const feed = await parser.parseURL(RSS_FEED_URL);
+    // ১. Cloudflare Pass করার জন্য fetch দিয়ে Feed নামানো
+    const response = await fetch(RSS_FEED_URL, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) GitHub-Actions-AutoPostBot/1.0',
+        'Accept': 'application/rss+xml, application/xml, text/xml, */*'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Status code ${response.status}`);
+    }
+
+    const xmlData = await response.text();
+
+    // ২. লোকালহোস্টের মতো rss-parser দিয়ে এক্স্যাক্ট একই উপায়ে পার্স করা
+    const feed = await parser.parseString(xmlData);
 
     if (feed.items && feed.items.length > 0) {
       const latestPost = feed.items[0];
