@@ -1,0 +1,29 @@
+name: Auto RSS Poster
+
+on:
+  schedule:
+    # প্রতি ৫ মিনিট পর পর চেক করবে (বা আপনার প্রয়োজনমতো টাইম চেঞ্জ করতে পারেন)
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # ম্যানুয়ালি রান টেস্ট করার জন্য বাটন দেবে
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Code Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Run Script
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: node index.js
