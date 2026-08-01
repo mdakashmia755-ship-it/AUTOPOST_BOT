@@ -1,4 +1,4 @@
-import { getTemplatesByCategory } from './templates/index';
+import { getTemplatesByCategory } from './templates/index.js';
 
 export default {
   // ১. Cron Trigger (অটোমেটিক প্রতি ৫/১০ মিনিট পর পর এটি চলবে)
