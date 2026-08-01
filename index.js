@@ -1,3 +1,4 @@
+import Parser from 'rss-parser';
 import { getTemplatesByCategory } from './templates/index.js';
 
 const parser = new Parser({
