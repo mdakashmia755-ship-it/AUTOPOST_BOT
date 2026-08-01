@@ -1,101 +1,51 @@
 import { getTemplatesByCategory } from './templates/index.js';
 
-export default {
-  // ১. Cron Trigger
-  async scheduled(event, env, ctx) {
-    ctx.waitUntil(checkRssAndPost(env));
-  },
-
-  // ২. Manual / Browser Hit Trigger
-  async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-    if (url.pathname === '/favicon.ico') {
-      return new Response(null, { status: 204 });
-    }
-
-    await checkRssAndPost(env);
-    return new Response("Auto-poster trigger status checked successfully!", {
-      headers: { "Content-Type": "text/plain; charset=utf-8" }
-    });
+const parser = new Parser({
+  customFields: {
+    item: [
+      ['media:thumbnail', 'mediaThumbnail'],
+      ['media:content', 'mediaContent'],
+      ['content:encoded', 'contentEncoded']
+    ],
   }
-};
+});
 
-// 🎯 Thumbnail, Title & Description এক্সট্র্যাক্ট করার উন্নত ফাংশন
-function extractMetadata(fullItemXml) {
-  const titleMatch = fullItemXml.match(/title:\s*["']([^"']+)["']/i);
-  const descMatch = fullItemXml.match(/description:\s*[`"']([^`"']+)[`"']/i);
-  let thumbMatch = fullItemXml.match(/thumbnailUrl:\s*["']([^"']+)["']/i);
+// কনফিগারেশন
+const RSS_FEED_URL = 'https://akashmiaofficial.icu/feeds/posts/default?alt=rss';
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL; 
 
-  let thumbnailUrl = thumbMatch ? thumbMatch[1] : null;
-
-  // Localhost-এর rss-parser যেমন media:thumbnail / enclosure / img খুঁজে পায়, সেটির ম্যানুয়াল ফিক্স:
-  if (!thumbnailUrl) {
-    const mediaMatch = fullItemXml.match(/<media:thumbnail[^>]*url=["']([^"']+)["']/i) ||
-                       fullItemXml.match(/<enclosure[^>]*url=["']([^"']+)["']/i);
-    if (mediaMatch) thumbnailUrl = mediaMatch[1];
-  }
-
-  if (!thumbnailUrl) {
-    const imgMatch = fullItemXml.match(/<img[^>]+src=["']([^"']+)["']/i);
-    if (imgMatch) thumbnailUrl = imgMatch[1];
-  }
-
-  // Blogger low-resolution ইমেজকে হাই-রেজোলিউশন (s1600)-এ রূপান্তর
-  if (thumbnailUrl && thumbnailUrl.includes('googleusercontent.com')) {
-    thumbnailUrl = thumbnailUrl.replace(/\/s\d+(-c)?\//, '/s1600/');
-  }
+function extractMetadata(htmlContent) {
+  const titleMatch = htmlContent.match(/title:\s*["']([^"']+)["']/i);
+  const descMatch = htmlContent.match(/description:\s*[`"']([^`"']+)[`"']/i);
+  const thumbMatch = htmlContent.match(/thumbnailUrl:\s*["']([^"']+)["']/i);
 
   return {
     title: titleMatch ? titleMatch[1] : null,
     description: descMatch ? descMatch[1] : null,
-    thumbnailUrl: thumbnailUrl,
+    thumbnailUrl: thumbMatch ? thumbMatch[1] : null,
   };
 }
 
-async function checkRssAndPost(env) {
-  const RSS_URL = env.RSS_FEED_URL || 'https://akashmiaofficial.icu/feeds/posts/default?alt=rss';
-  const BOT_TOKEN = env.TELEGRAM_BOT_TOKEN;
-  const CHAT_ID = env.TELEGRAM_CHAT_ID;
-  const DISCORD_WEBHOOK_URL = env.DISCORD_WEBHOOK_URL;
+async function runLocalTest() {
+  console.log('🔄 RSS Feed চেক করা হচ্ছে...');
 
   try {
-    const res = await fetch(RSS_URL);
-    const xmlText = await res.text();
+    const feed = await parser.parseURL(RSS_FEED_URL);
 
-    const linkMatch = xmlText.match(/<link[^>]*href=["']([^"']+)["']/i) || xmlText.match(/<link>([^<]+)<\/link>/i);
-    const itemMatch = xmlText.match(/<item>([\s\S]*?)<\/item>/i) || xmlText.match(/<entry>([\s\S]*?)<\/entry>/i);
+    if (feed.items && feed.items.length > 0) {
+      const latestPost = feed.items[0];
+      const postLink = latestPost.link || '';
+      const fullContent = latestPost.content || latestPost['content:encoded'] || '';
+      const categories = latestPost.categories || [];
 
-    if (!linkMatch || !itemMatch) {
-      console.log("⚠️ RSS Feed-এ কোনো পোস্ট পাওয়া যায়নি।");
-      return;
-    }
+      console.log(`🏷️ পোস্টের লেবেলসমূহ:`, categories);
 
-    const latestLink = linkMatch[1];
-    const fullContent = itemMatch[1];
-
-    // 🎯 RSS Feed থেকে Category / Label বের করা
-    const categoryMatches = [
-      ...fullContent.matchAll(/<category[^>]*term=["']([^"']+)["']/gi),
-      ...fullContent.matchAll(/<category[^>]*>([^<]+)<\/category>/gi)
-    ];
-    
-    const categories = [...new Set(categoryMatches.map(m => m[1]?.trim()).filter(Boolean))];
-
-    console.log("🏷️ Cloudflare Extracted Labels:", categories);
-
-    let lastPostedLink = null;
-    if (env.TG_BOT_KV) {
-      lastPostedLink = await env.TG_BOT_KV.get("LAST_POSTED_LINK");
-    }
-
-    if (latestLink !== lastPostedLink) {
       const meta = extractMetadata(fullContent);
 
-      const titleMatch = fullContent.match(/<title[^>]*>([^<]+)<\/title>/i);
-      const defaultTitle = titleMatch ? titleMatch[1].replace("<![CDATA[", "").replace("]]>", "").trim() : 'New Post';
-
-      const finalTitle = meta.title || defaultTitle;
-      const rawDesc = meta.description || '';
+      const finalTitle = meta.title || latestPost.title || 'New Post';
+      const rawDesc = meta.description || latestPost.contentSnippet || '';
       const cleanDesc = rawDesc.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim();
       const shortDescription = cleanDesc.length > 150 ? cleanDesc.slice(0, 150) + '...' : cleanDesc;
       const finalThumbnail = meta.thumbnailUrl;
@@ -103,26 +53,26 @@ async function checkRssAndPost(env) {
       const postData = {
         title: finalTitle,
         description: shortDescription,
-        postLink: latestLink,
+        postLink: postLink,
         thumbnailUrl: finalThumbnail
       };
 
+      // টেলিগ্রাম এবং ডিসকোর্ড উভয় টেমপ্লেট নিয়ে আসা
       const { telegram, discord } = getTemplatesByCategory(categories, postData);
 
-      // --- ১. Telegram Post ---
-      let telegramUrl = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+      // --- ১. Telegram-এ পোস্ট পাঠানো ---
+      let telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
       let tgPayload = {
-        chat_id: CHAT_ID,
+        chat_id: TELEGRAM_CHAT_ID,
         text: telegram.caption,
         parse_mode: 'HTML',
-        reply_markup: telegram.replyMarkup,
-        disable_web_page_preview: true // এক্সট্রা লিংক প্রিভিউ অফ রাখবে
+        reply_markup: telegram.replyMarkup
       };
 
       if (finalThumbnail) {
-        telegramUrl = `https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`;
+        telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`;
         tgPayload = {
-          chat_id: CHAT_ID,
+          chat_id: TELEGRAM_CHAT_ID,
           photo: finalThumbnail,
           caption: telegram.caption,
           parse_mode: 'HTML',
@@ -130,34 +80,41 @@ async function checkRssAndPost(env) {
         };
       }
 
+      console.log('📤 Telegram-এ পোস্ট পাঠানো হচ্ছে...');
       const tgRes = await fetch(telegramUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(tgPayload)
       });
       const tgResult = await tgRes.json();
 
-      // --- ২. Discord Post ---
+      if (tgResult.ok) console.log('✅ Telegram-এ পোস্ট সফল!');
+      else console.error('❌ Telegram এরর:', tgResult.description || tgResult);
+
+      // --- ২. Discord-এ পোস্ট পাঠানো ---
       if (DISCORD_WEBHOOK_URL && DISCORD_WEBHOOK_URL.startsWith('http')) {
-        await fetch(DISCORD_WEBHOOK_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+        console.log('📤 Discord Webhook-এ পোস্ট পাঠানো হচ্ছে...');
+        const dcRes = await fetch(DISCORD_WEBHOOK_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(discord)
         });
+
+        if (dcRes.ok || dcRes.status === 204) {
+          console.log('✅ Discord-এ Embed পোস্ট সফল!');
+        } else {
+          console.error('❌ Discord এরর Status:', dcRes.status);
+        }
+      } else {
+        console.log('ℹ️ Discord Webhook URL সেট করা নেই, তাই Discord পোস্ট স্কিপ করা হলো।');
       }
 
-      if (tgResult.ok) {
-        if (env.TG_BOT_KV) {
-          await env.TG_BOT_KV.put("LAST_POSTED_LINK", latestLink);
-        }
-        console.log("✅ Custom Template দিয়ে সফলভাবে পোস্ট করা হয়েছে!");
-      } else {
-        console.error("❌ Telegram Error:", tgResult);
-      }
     } else {
-      console.log("ℹ️ কোনো নতুন পোস্ট নেই।");
+      console.log('⚠️ RSS Feed-এ কোনো পোস্ট নেই।');
     }
-  } catch (err) {
-    console.error("❌ Worker Execution Error:", err);
+  } catch (error) {
+    console.error('❌ এরর ধরা পড়েছে:', error);
   }
 }
+
+runLocalTest();
