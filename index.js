@@ -11,8 +11,10 @@ const parser = new Parser({
   }
 });
 
-// কনফিগারেশন
-const RSS_FEED_URL = 'https://akashmiaofficial.icu/feeds/posts/default?alt=rss';
+// 🎯 Cloudflare/Blogger 403 Bypass করার জন্য Cors-Proxy যোগ করা হয়েছে
+const TARGET_URL = 'https://akashmiaofficial.icu/feeds/posts/default?alt=rss';
+const RSS_FEED_URL = `https://api.allorigins.win/raw?url=${encodeURIComponent(TARGET_URL)}`;
+
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
@@ -33,24 +35,8 @@ async function runLocalTest() {
   console.log('🔄 RSS Feed চেক করা হচ্ছে...');
 
   try {
-    // 🎯 Step 1: Native Fetch দিয়ে Real Browser Header পাঠাই (Cloudflare Bypass)
-    const response = await fetch(RSS_FEED_URL, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Cache-Control': 'no-cache'
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP Fetch Error Status: ${response.status}`);
-    }
-
-    const xmlData = await response.text();
-
-    // 🎯 Step 2: XML টেক্সটকে Parser-এ পাস করি
-    const feed = await parser.parseString(xmlData);
+    // 🎯 Proxy-র মাধ্যমে Feed ফেচ করা
+    const feed = await parser.parseURL(RSS_FEED_URL);
 
     if (feed.items && feed.items.length > 0) {
       const latestPost = feed.items[0];
