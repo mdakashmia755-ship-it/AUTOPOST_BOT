@@ -1,16 +1,18 @@
 name: Auto RSS Poster
 
 on:
+  repository_dispatch:
+    types: [trigger-cron] # cron-job.org থেকে পাঠানো রিকোয়েস্ট ক্যাচ করবে
   schedule:
-    # প্রতি ৫ মিনিট পর পর চেক করবে
+    # ব্যাকআপ হিসেবে গিটহাবের নিজস্ব ক্রন রাখা হলো
     - cron: '*/5 * * * *'
-  workflow_dispatch: # ম্যানুয়ালি রান টেস্ট করার জন্য বাটন দেবে
+  workflow_dispatch: # ম্যানুয়ালি রান টেস্ট করার জন্য
 
 jobs:
   post:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # গিটহাবে ফাইল কমিট করার পারমিশন দেওয়ার জন্য এটি জরুরি
+      contents: write # গিটহাবে ফাইল কমিট করার পারমিশন
     steps:
       - name: Code Checkout
         uses: actions/checkout@v4
