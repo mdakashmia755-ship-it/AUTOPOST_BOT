@@ -1,58 +1,32 @@
-import Parser from 'rss-parser';
 import { getTemplatesByCategory } from './templates/index.js';
-
-const parser = new Parser({
-  customFields: {
-    item: [
-      ['media:thumbnail', 'mediaThumbnail'],
-      ['media:content', 'mediaContent'],
-      ['content:encoded', 'contentEncoded']
-    ],
-  }
-});
-
-// 🎯 Cloudflare/Blogger 403 Bypass করার জন্য Cors-Proxy যোগ করা হয়েছে
-const TARGET_URL = 'https://akashmiaofficial.icu/feeds/posts/default?alt=rss';
-const RSS_FEED_URL = `https://api.allorigins.win/raw?url=${encodeURIComponent(TARGET_URL)}`;
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 
-function extractMetadata(htmlContent) {
-  const titleMatch = htmlContent.match(/title:\s*["']([^"']+)["']/i);
-  const descMatch = htmlContent.match(/description:\s*[`"']([^`"']+)[`"']/i);
-  const thumbMatch = htmlContent.match(/thumbnailUrl:\s*["']([^"']+)["']/i);
-
-  return {
-    title: titleMatch ? titleMatch[1] : null,
-    description: descMatch ? descMatch[1] : null,
-    thumbnailUrl: thumbMatch ? thumbMatch[1] : null,
-  };
-}
-
 async function runLocalTest() {
-  console.log('🔄 RSS Feed চেক করা হচ্ছে...');
+  console.log('🔄 Cloudflare Bypass করে RSS Feed চেক করা হচ্ছে...');
 
   try {
-    // 🎯 Proxy-র মাধ্যমে Feed ফেচ করা
-    const feed = await parser.parseURL(RSS_FEED_URL);
+    // 🎯 Cloudflare Bypass API Endpoint
+    const BLOG_FEED_URL = 'https://www.akashmiaofficial.icu/feeds/posts/default?alt=rss';
+    const API_URL = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(BLOG_FEED_URL)}`;
 
-    if (feed.items && feed.items.length > 0) {
-      const latestPost = feed.items[0];
+    const response = await fetch(API_URL);
+    const data = await response.json();
+
+    if (data.status === 'ok' && data.items && data.items.length > 0) {
+      const latestPost = data.items[0];
       const postLink = latestPost.link || '';
-      const fullContent = latestPost.content || latestPost['content:encoded'] || '';
+      const fullContent = latestPost.content || latestPost.description || '';
       const categories = latestPost.categories || [];
 
       console.log(`🏷️ পোস্টের লেবেলসমূহ:`, categories);
 
-      const meta = extractMetadata(fullContent);
-
-      const finalTitle = meta.title || latestPost.title || 'New Post';
-      const rawDesc = meta.description || latestPost.contentSnippet || '';
-      const cleanDesc = rawDesc.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim();
+      const finalTitle = latestPost.title || 'New Post';
+      const cleanDesc = fullContent.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim();
       const shortDescription = cleanDesc.length > 150 ? cleanDesc.slice(0, 150) + '...' : cleanDesc;
-      const finalThumbnail = meta.thumbnailUrl;
+      const finalThumbnail = latestPost.thumbnail || latestPost.enclosure?.link;
 
       const postData = {
         title: finalTitle,
@@ -111,7 +85,7 @@ async function runLocalTest() {
       }
 
     } else {
-      console.log('⚠️ RSS Feed-এ কোনো পোস্ট নেই।');
+      console.log('⚠️ RSS Feed পাওয়া যায়নি বা Cloudflare ব্লক করেছে।');
     }
   } catch (error) {
     console.error('❌ এরর ধরা পড়েছে:', error);
