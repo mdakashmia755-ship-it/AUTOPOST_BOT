@@ -20,16 +20,35 @@ export default {
   }
 };
 
-// HTML Content থেকে Title, Description, Thumbnail বের করার ফাংশন
-function extractMetadata(htmlContent) {
-  const titleMatch = htmlContent.match(/title:\s*["']([^"']+)["']/i);
-  const descMatch = htmlContent.match(/description:\s*[`"']([^`"']+)[`"']/i);
-  const thumbMatch = htmlContent.match(/thumbnailUrl:\s*["']([^"']+)["']/i);
+// 🎯 Thumbnail, Title & Description এক্সট্র্যাক্ট করার উন্নত ফাংশন
+function extractMetadata(fullItemXml) {
+  const titleMatch = fullItemXml.match(/title:\s*["']([^"']+)["']/i);
+  const descMatch = fullItemXml.match(/description:\s*[`"']([^`"']+)[`"']/i);
+  let thumbMatch = fullItemXml.match(/thumbnailUrl:\s*["']([^"']+)["']/i);
+
+  let thumbnailUrl = thumbMatch ? thumbMatch[1] : null;
+
+  // Localhost-এর rss-parser যেমন media:thumbnail / enclosure / img খুঁজে পায়, সেটির ম্যানুয়াল ফিক্স:
+  if (!thumbnailUrl) {
+    const mediaMatch = fullItemXml.match(/<media:thumbnail[^>]*url=["']([^"']+)["']/i) ||
+                       fullItemXml.match(/<enclosure[^>]*url=["']([^"']+)["']/i);
+    if (mediaMatch) thumbnailUrl = mediaMatch[1];
+  }
+
+  if (!thumbnailUrl) {
+    const imgMatch = fullItemXml.match(/<img[^>]+src=["']([^"']+)["']/i);
+    if (imgMatch) thumbnailUrl = imgMatch[1];
+  }
+
+  // Blogger low-resolution ইমেজকে হাই-রেজোলিউশন (s1600)-এ রূপান্তর
+  if (thumbnailUrl && thumbnailUrl.includes('googleusercontent.com')) {
+    thumbnailUrl = thumbnailUrl.replace(/\/s\d+(-c)?\//, '/s1600/');
+  }
 
   return {
     title: titleMatch ? titleMatch[1] : null,
     description: descMatch ? descMatch[1] : null,
-    thumbnailUrl: thumbMatch ? thumbMatch[1] : null,
+    thumbnailUrl: thumbnailUrl,
   };
 }
 
@@ -54,13 +73,12 @@ async function checkRssAndPost(env) {
     const latestLink = linkMatch[1];
     const fullContent = itemMatch[1];
 
-    // 🎯 Blogger Feed থেকে সবধরনের Category / Label সঠিকভাবে রিড করার নিখুঁত লজিক
+    // 🎯 RSS Feed থেকে Category / Label বের করা
     const categoryMatches = [
       ...fullContent.matchAll(/<category[^>]*term=["']([^"']+)["']/gi),
       ...fullContent.matchAll(/<category[^>]*>([^<]+)<\/category>/gi)
     ];
     
-    // ক্যাটাগরিগুলো ফিল্টার করে ক্লিন অ্যারে বানানো
     const categories = [...new Set(categoryMatches.map(m => m[1]?.trim()).filter(Boolean))];
 
     console.log("🏷️ Cloudflare Extracted Labels:", categories);
@@ -89,7 +107,6 @@ async function checkRssAndPost(env) {
         thumbnailUrl: finalThumbnail
       };
 
-      // 🎯 সরাসরি আপনার templates/index.js-কে কল করা (কোনো ফলব্যাক ছাড়া)
       const { telegram, discord } = getTemplatesByCategory(categories, postData);
 
       // --- ১. Telegram Post ---
@@ -98,7 +115,8 @@ async function checkRssAndPost(env) {
         chat_id: CHAT_ID,
         text: telegram.caption,
         parse_mode: 'HTML',
-        reply_markup: telegram.replyMarkup
+        reply_markup: telegram.replyMarkup,
+        disable_web_page_preview: true // এক্সট্রা লিংক প্রিভিউ অফ রাখবে
       };
 
       if (finalThumbnail) {
@@ -132,12 +150,12 @@ async function checkRssAndPost(env) {
         if (env.TG_BOT_KV) {
           await env.TG_BOT_KV.put("LAST_POSTED_LINK", latestLink);
         }
-        console.log("✅ Custom Template দিয়ে সফলভাবে পোস্ট করা হয়েছে!");
+        console.log("✅ Custom Template দিয়ে সফলভাবে পোস্ট করা হয়েছে!");
       } else {
         console.error("❌ Telegram Error:", tgResult);
       }
     } else {
-      console.log("ℹ️ কোনো নতুন পোস্ট নেই, লাস্ট পোস্ট আপডেট করা শেষ।");
+      console.log("ℹ️ কোনো নতুন পোস্ট নেই।");
     }
   } catch (err) {
     console.error("❌ Worker Execution Error:", err);
